@@ -40,7 +40,7 @@ reported as a skip with its reason.
 | --- | --- | --- |
 | `checks` | ubuntu | unit checks pass, and the published version scheme orders correctly under Scoop's own comparator |
 | `resolve` | ubuntu | which upstream release to build, and whether to build at all |
-| `build` | windows-2025 | the checkout is the admitted commit, upstream's light build succeeds, the packaged stamp says `payload=light` / `updateMechanism=external`, no agent payload shipped, the app launches twice with a crippled PATH, the ZIP and provenance are produced |
+| `build` | windows-2025 | the checkout is the admitted commit, upstream's light build succeeds, the packaged stamp says `payload=light` / `updateMechanism=external`, no agent payload shipped, the application `LICENSE` (staged from the admitted commit) plus the Electron and Chromium notices are in the package, the app launches twice with a crippled PATH, the ZIP and provenance are produced |
 | `publish` | ubuntu | every asset uploads and reads back with a matching digest, the release is published, and the pointer/manifest are committed to `main` |
 
 The build guards are fail-closed: a mismatch in commit, tag, claim object, stamp,
@@ -143,10 +143,13 @@ packaging behaviour are all provable without a Windows runner or a released buil
 ## Deliberately not here
 
 No upstream feed or channel tracking, no MSIX/Store packaging, no macOS or ARM64 leg,
-no code signing, no Scoop install acceptance test (the bucket repo can run that), and
-no license-bundle audit beyond the notice and upstream's own `LICENSE` files in the
-package. The build runs upstream's driver unmodified; if upstream changes the light
-contract, the stamp and identity guards are what will fail first, loudly.
+no code signing, no Scoop install acceptance test (the bucket repo can run that), and no
+full dependency licence audit beyond what the build asserts: upstream's own `LICENSE` is
+staged from the admitted commit, and the Electron and Chromium notices must be present.
+That last part is deliberate — the light variant's `--dir` packaging does not carry the
+application's licence text on its own, and redistributing an MIT application without it
+is not permitted. The build runs upstream's driver unmodified; if upstream changes the
+light contract, the stamp and identity guards are what will fail first, loudly.
 
 ## Credit
 

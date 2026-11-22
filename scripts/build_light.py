@@ -34,6 +34,12 @@ PREPARED_RELATIVE = Path(".build/desktop-job/prepared.json")
 AGENT_PAYLOAD_RELATIVE = Path("resources/agent-payload")
 STAMP_RELATIVE = Path("resources/install-stamp.json")
 NOTICE_NAME = "UNOFFICIAL-BUILD.txt"
+# Files that must ship with a redistributed build: the application's own MIT licence
+# (staged from the admitted commit by stage_license) and the notices electron-builder
+# emits for Electron and Chromium. The light variant's `--dir` packaging does not carry
+# the application LICENSE on its own, which is why it is staged explicitly.
+LICENSE_NAME = "LICENSE"
+PACKAGER_LICENSES = ("LICENSE.electron.txt", "LICENSES.chromium.html")
 EXPECTED_STAMP = {
     "payload": "light",
     "distribution": "desktop-app",
@@ -112,6 +118,11 @@ def assert_pack(pack: Path, commit: str, tag: str) -> dict:
         raise BuildError("light build unexpectedly contains a local agent payload")
     if not (pack / "resources/app.asar").is_file():
         raise BuildError("packaged build has no resources/app.asar")
+    for name in (LICENSE_NAME, *PACKAGER_LICENSES):
+        if not (pack / name).is_file():
+            raise BuildError(f"packaged build does not carry {name}; a redistribution "
+                             "needs the application's MIT text and the Electron and "
+                             "Chromium notices")
     return stamp
 
 
@@ -191,6 +202,27 @@ def smoke(source: Path, pack: Path, executable: str, out: Path, script: Path,
 
 
 # --------------------------------------------------------------------------- package
+def stage_licenses(source: Path, pack: Path) -> dict:
+    """Put the application's own licence text into the package before zipping.
+
+    The packager brings Electron's and Chromium's notices with it, but the light
+    variant's `--dir` output does not carry the application LICENSE on its own, and
+    redistributing an MIT application without its licence text is not permitted.
+    """
+    result = subprocess.run(["git", "-C", str(source), "show", f"HEAD:{LICENSE_NAME}"],
+                            capture_output=True, check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        raise BuildError(f"cannot read {LICENSE_NAME} from the admitted commit")
+    (pack / LICENSE_NAME).write_bytes(result.stdout)
+    staged = {LICENSE_NAME: {"sha256": sha256_bytes(result.stdout),
+                             "size": len(result.stdout)}}
+    for name in PACKAGER_LICENSES:
+        path = pack / name
+        if path.is_file():
+            staged[name] = {"sha256": sha256_file(path), "size": path.stat().st_size}
+    return staged
+
+
 def write_notice(pack: Path, *, upstream: str, upstream_tag: str, commit: str,
                  claim_tag: str, version: str, version_url: str, built_at: str) -> Path:
     notice = pack / NOTICE_NAME
@@ -245,14 +277,13 @@ def build(args) -> dict:
         raise BuildError(f"packaged build directory is missing: {pack}")
 
     assert_checkout(source, args.expected_commit)
+    # Stage the licence text before asserting the package: the application LICENSE is
+    # not part of the packager's output, and the assertion below requires it.
+    licenses = stage_licenses(source, pack)
     stamp = assert_pack(pack, args.expected_commit, args.tag)
     executable = identity_executable(source, args.tag)
     if not (pack / executable).is_file():
         raise BuildError(f"packaged build does not contain {executable}")
-
-    license_sha = sha256_bytes(
-        subprocess.run(["git", "-C", str(source), "show", "HEAD:LICENSE"],
-                       capture_output=True, check=True).stdout)
 
     checks = None
     if not args.skip_smoke:
@@ -293,7 +324,7 @@ def build(args) -> dict:
             "claimObject": args.claim_object,
             "publishedAt": os.environ.get("UPSTREAM_PUBLISHED_AT", ""),
             "url": os.environ.get("UPSTREAM_URL", ""),
-            "licenseSha256": license_sha,
+            "licenseSha256": licenses[LICENSE_NAME]["sha256"],
         },
         "builder": {
             "repository": repository,
@@ -309,6 +340,7 @@ def build(args) -> dict:
             "baseVersion": stamp.get("baseVersion"),
             "stampSource": stamp.get("source"),
             "notice": {"name": NOTICE_NAME, "sha256": sha256_file(notice)},
+            "licenses": licenses,
         },
         "nativeChecks": checks,
         "signing": "unsigned unofficial build",

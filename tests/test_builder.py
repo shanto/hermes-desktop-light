@@ -206,6 +206,8 @@ class GuardTest(unittest.TestCase):
         (pack / "resources" / "install-stamp.json").write_text(json.dumps(stamp),
                                                                encoding="utf-8")
         (pack / "Hermes Light.exe").write_bytes(b"exe")
+        for licence in ("LICENSE", "LICENSE.electron.txt", "LICENSES.chromium.html"):
+            (pack / licence).write_bytes(b"licence text\n")
         return pack
 
     # -- checkout and ref guards -------------------------------------------
@@ -277,6 +279,43 @@ class GuardTest(unittest.TestCase):
         (pack / "resources" / "install-stamp.json").unlink()
         with self.assertRaises(build_light.BuildError):
             build_light.assert_pack(pack, COMMIT, "v0.23.3")
+
+    def test_pack_guard_requires_the_licence_text(self):
+        # The light variant's packager output carries no application LICENSE, and a
+        # redistribution without it is not permitted, so its absence must fail.
+        for missing in ("LICENSE", "LICENSE.electron.txt", "LICENSES.chromium.html"):
+            with self.subTest(missing=missing):
+                pack = self.make_pack(name=f"pack-{missing}")
+                (pack / missing).unlink()
+                with self.assertRaises(build_light.BuildError):
+                    build_light.assert_pack(pack, COMMIT, "v0.23.3")
+
+    def test_stage_licenses_copies_the_admitted_commit_bytes(self):
+        repo = self.make_repo()
+        pack = self.root / "stage-pack"
+        pack.mkdir()
+        for notice in build_light.PACKAGER_LICENSES:
+            (pack / notice).write_bytes(b"packager notice\n")
+        staged = build_light.stage_licenses(repo, pack)
+        expected = subprocess.run(["git", "-C", str(repo), "show", "HEAD:LICENSE"],
+                                  capture_output=True, check=True).stdout
+        self.assertEqual((pack / "LICENSE").read_bytes(), expected)
+        self.assertEqual(staged["LICENSE"]["sha256"], build_light.sha256_bytes(expected))
+        self.assertEqual(staged["LICENSE"]["size"], len(expected))
+        for notice in build_light.PACKAGER_LICENSES:
+            self.assertIn(notice, staged)
+
+    def test_stage_licenses_refuses_a_commit_without_a_licence(self):
+        repo = self.root / "unlicensed"
+        repo.mkdir()
+        (repo / "README").write_text("no licence here\n", encoding="utf-8")
+        for argv in (["init", "-q"], ["config", "user.email", "b@example.com"],
+                     ["config", "user.name", "Builder"], ["add", "README"],
+                     ["commit", "-qm", "no licence"]):
+            subprocess.run(["git", "-C", str(repo), *argv], check=True)
+        (self.root / "empty-pack").mkdir()
+        with self.assertRaises(build_light.BuildError):
+            build_light.stage_licenses(repo, self.root / "empty-pack")
 
     # -- packaging ---------------------------------------------------------
     def test_zip_is_deterministic_and_sorted(self):
