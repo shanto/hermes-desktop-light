@@ -14,8 +14,13 @@ name: Hermes Desktop Light build
 
 on:
   schedule:
-    # Every six hours; the resolver exits immediately when nothing is new.
-    - cron: '17 */6 * * *'
+    # Every six hours at :52 (moved from :17) -- 00:52/06:52/12:52/18:52 UTC. The
+    # resolver exits in seconds when nothing is new, so extra fires are cheap.
+    - cron: '52 */6 * * *'
+    # One-off kickoff so the first build starts in minutes instead of waiting for the
+    # next six-hourly slot. Delete this line once the first release is published: it
+    # otherwise costs one wasted resolver run a day.
+    - cron: '52 11 * * *'
   workflow_dispatch:
     inputs:
       revision:
@@ -32,9 +37,10 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: hermes-desktop-light
-  cancel-in-progress: false
+# Concurrency is deliberately per job, not per workflow: the upstream commit is only
+# known after `resolve` runs, so a workflow-level group cannot be keyed on it.
+# `checks` and `resolve` are cheap and stay unconstrained; the expensive work is bound
+# to the upstream commit and the publish step to the release tag.
 
 jobs:
   checks:
@@ -97,6 +103,12 @@ jobs:
     if: needs.resolve.outputs.build == 'true'
     runs-on: windows-2025
     timeout-minutes: 180
+    concurrency:
+      # One build per upstream commit. A run that resolves to a commit already being
+      # built supersedes it instead of building the same release twice; the
+      # superseded run never reaches `publish`, because its build did not succeed.
+      group: build-${{ needs.resolve.outputs.upstream_commit }}
+      cancel-in-progress: true
     steps:
       - name: Check out this builder
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -144,6 +156,12 @@ jobs:
     needs: [resolve, build]
     if: needs.build.result == 'success'
     runs-on: ubuntu-latest
+    concurrency:
+      # Never cancelled, only serialized per release tag: a duplicate run then stops at
+      # "release already exists" rather than racing another publish. A published
+      # release is never overwritten.
+      group: publish-${{ needs.resolve.outputs.release_tag }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0

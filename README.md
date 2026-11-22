@@ -106,11 +106,20 @@ update — and passes on this machine:
 
 ## Running it
 
-* Scheduled every six hours; exits immediately when the newest release is already published here.
+* Scheduled six-hourly at `:52` (00:52/06:52/12:52/18:52 UTC); the resolver exits in
+  seconds when the newest release is already published here. A second schedule entry
+  kicks the very first run off; delete that line once a release exists.
 * Manual: `gh workflow run build.yml -f revision=1` for a first build, or
   `-f revision=2 -f force=true` to rebuild a version that is already published.
 * Re-publishing an existing version is refused unless `force` is set, and a published
   release is never overwritten — a rebuild always gets a new revision.
+* Concurrency is per upstream commit, not per workflow: `build` holds
+  `build-<upstream commit>` with `cancel-in-progress: true`, so the same release is
+  never built twice in parallel — a later run for that commit supersedes the earlier
+  one, whose `publish` is skipped because its build did not succeed. `publish` holds
+  `publish-<release tag>` with `cancel-in-progress: false`, so a publish is serialized
+  rather than cancelled and a duplicate stops at "release already exists". Workflow-level
+  keying is impossible here: the commit is only known after `resolve` runs.
 
 Repository setup: `contents: write` permission (already declared in the workflow).
 Optional: the `BUCKET_REPO` variable and `BUCKET_DISPATCH_TOKEN` secret described above.
