@@ -114,12 +114,13 @@ update — and passes on this machine:
 * Re-publishing an existing version is refused unless `force` is set, and a published
   release is never overwritten — a rebuild always gets a new revision.
 * Concurrency is per upstream commit, not per workflow: `build` holds
-  `build-<upstream commit>` with `cancel-in-progress: true`, so the same release is
-  never built twice in parallel — a later run for that commit supersedes the earlier
-  one, whose `publish` is skipped because its build did not succeed. `publish` holds
-  `publish-<release tag>` with `cancel-in-progress: false`, so a publish is serialized
-  rather than cancelled and a duplicate stops at "release already exists". Workflow-level
-  keying is impossible here: the commit is only known after `resolve` runs.
+  `build-<upstream commit>` with `cancel-in-progress: false`, so the same release is
+  never built twice in parallel and a build already running is never cancelled — a
+  duplicate run queues behind it, then skips itself after re-checking that the release
+  does not exist yet. `publish` holds `publish-<release tag>` with
+  `cancel-in-progress: false`, so a publish is serialized rather than cancelled and a
+  duplicate ends green having published nothing. Workflow-level keying is impossible
+  here: the commit is only known after `resolve` runs.
 
 Repository setup: `contents: write` permission (already declared in the workflow).
 Optional: the `BUCKET_REPO` variable and `BUCKET_DISPATCH_TOKEN` secret described above.

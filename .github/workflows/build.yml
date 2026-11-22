@@ -14,13 +14,9 @@ name: Hermes Desktop Light build
 
 on:
   schedule:
-    # Every six hours at :52 (moved from :17) -- 00:52/06:52/12:52/18:52 UTC. The
-    # resolver exits in seconds when nothing is new, so extra fires are cheap.
+    # Every six hours at :52 -- 00:52/06:52/12:52/18:52 UTC. Actions cron is always
+    # UTC; the resolver exits in seconds when nothing is new, so extra fires are cheap.
     - cron: '52 */6 * * *'
-    # One-off kickoff so the first build starts in minutes instead of waiting for the
-    # next six-hourly slot. Delete this line once the first release is published: it
-    # otherwise costs one wasted resolver run a day.
-    - cron: '52 11 * * *'
   workflow_dispatch:
     inputs:
       revision:
@@ -104,27 +100,46 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 180
     concurrency:
-      # One build per upstream commit. A run that resolves to a commit already being
-      # built supersedes it instead of building the same release twice; the
-      # superseded run never reaches `publish`, because its build did not succeed.
+      # One build per upstream commit, and never cancel a build that is already
+      # running: cancelling would throw away up to two hours of work and start it
+      # over. A duplicate run for the same commit instead queues behind it and then
+      # short-circuits in the check below, because by then the release exists.
       group: build-${{ needs.resolve.outputs.upstream_commit }}
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - name: Check out this builder
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: builder
+      - name: Is this version already published?
+        id: published
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ needs.resolve.outputs.release_tag }}'
+          gh api "/repos/${{ github.repository }}/releases/tags/$tag" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            'published=true' >> $env:GITHUB_OUTPUT
+            Write-Host "release $tag already exists: skipping this build"
+          }
+          else {
+            'published=false' >> $env:GITHUB_OUTPUT
+          }
       - name: Check out the admitted upstream commit
+        if: steps.published.outputs.published == 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ needs.resolve.outputs.upstream_repo }}
           ref: ${{ needs.resolve.outputs.upstream_commit }}
           fetch-depth: 0
           path: upstream
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - if: steps.published.outputs.published == 'false'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.13'
       - name: Build, verify and package
+        if: steps.published.outputs.published == 'false'
         shell: pwsh
         env:
           UPSTREAM_PUBLISHED_AT: ${{ needs.resolve.outputs.upstream_published_at }}
@@ -144,6 +159,7 @@ jobs:
           )
           python @arguments
       - name: Upload the verified package
+        if: steps.published.outputs.published == 'false'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: hermes-desktop-light
@@ -164,11 +180,25 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Is this version already published?
+        id: published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api "/repos/${{ github.repository }}/releases/tags/${{ needs.resolve.outputs.release_tag }}" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "release ${{ needs.resolve.outputs.release_tag }} already exists: nothing to publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: steps.published.outputs.published == 'false'
         with:
           name: hermes-desktop-light
           path: output
       - name: Publish the release, then point the bucket at it
+        if: steps.published.outputs.published == 'false'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BUCKET_REPO: ${{ vars.BUCKET_REPO }}
@@ -183,8 +213,9 @@ jobs:
       - name: Summarise
         run: |
           {
-            echo "### Published ${{ needs.resolve.outputs.release_tag }}"
+            echo "### ${{ needs.resolve.outputs.release_tag }}"
             echo ""
+            echo "- already published before this run: ${{ steps.published.outputs.published }}"
             echo "- asset: hermes-desktop-light-${{ needs.resolve.outputs.version }}-windows-x64.zip"
             echo "- pointer: latest.json (main) and the release assets"
             echo "- bucket: ${{ vars.BUCKET_REPO }}"
