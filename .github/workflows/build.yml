@@ -75,7 +75,7 @@ jobs:
           FORCE: ${{ inputs.force || 'false' }}
         run: |
           set -euo pipefail
-          args=(--revision "$REVISION" --output "$GITHUB_OUTPUT")
+          args=(--repository "${{ github.repository }}" --revision "$REVISION" --output "$GITHUB_OUTPUT")
           if [ "$FORCE" = "true" ]; then args+=(--force); fi
           python3 scripts/resolve_release.py "${args[@]}"
       - name: Summarise

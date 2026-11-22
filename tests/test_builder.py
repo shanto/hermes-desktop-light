@@ -34,7 +34,7 @@ OTHER_COMMIT = "ae2a81ccc00e9b7c06301523e5bb09608397149c"
 TAG_OBJECT = "2861fe3744f8134b782659438961a4f69ab5d495"
 CLAIM_OBJECT = "8de0016e755d3cdb834656b75148ecdda8182be1"
 UPSTREAM = "NousResearch/hermes-agent"
-REPOSITORY = "shanto/hermes-light-builder"
+REPOSITORY = "shanto/hermes-desktop-light"
 CLAIM_DATE = "2026-11-20T07:00:00Z"
 CLAIM_EPOCH = str(int(datetime(2026, 11, 20, 7, 0, 0, tzinfo=timezone.utc).timestamp()))
 
