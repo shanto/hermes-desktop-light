@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/ScoopInstaller/Scoop/master/schema.json",
+  "version": "0.23.3",
+  "description": "Hermes Desktop remote-only build 0.23.3 (unofficial, no local agent) from the official release v0.23.3",
+  "homepage": "https://github.com/NousResearch/hermes-agent",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/shanto/hermes-desktop-light/releases/download/v0.23.3/hermes-desktop-light-0.23.3-windows-x64.zip",
+      "hash": "04becc93b2e56901fe3cfad7343b38ba44884c90e20367586872f838a812ac0c"
+    }
+  },
+  "shortcuts": [
+    [
+      "Hermes Light.exe",
+      "Hermes Desktop (Light, Unofficial)"
+    ]
+  ],
+  "checkver": {
+    "url": "https://raw.githubusercontent.com/shanto/hermes-desktop-light/main/latest.json",
+    "jsonpath": "$.version"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/shanto/hermes-desktop-light/releases/download/v$version/hermes-desktop-light-$version-windows-x64.zip",
+        "hash": {
+          "url": "https://raw.githubusercontent.com/shanto/hermes-desktop-light/main/latest.json",
+          "jsonpath": "$.sha256"
+        }
+      }
+    }
+  },
+  "notes": "Unofficial unsigned x64 build of Hermes Desktop with no local Python and no local agent: connect it to a Hermes gateway you already run. Upstream does not produce or support this package (source release v0.23.3)."
+}
