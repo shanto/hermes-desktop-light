@@ -1,0 +1,6 @@
+# Build products and scratch: releases carry the artifacts, git never does.
+output/
+
+# Python bytecode from the local checks.
+__pycache__/
+*.pyc

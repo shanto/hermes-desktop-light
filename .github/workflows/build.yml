@@ -1,0 +1,173 @@
+# Hermes Desktop Light - part one of two.
+#
+# This repository tracks only the newest plain (non-prerelease) release of
+# NousResearch/hermes-agent, builds the upstream-native remote-only "light" Windows
+# payload from that exact commit, verifies it, and publishes it as a release here.
+# No upstream Desktop channel or feed is consulted: upstream's release *claim* is
+# used purely because upstream's own preparation demands it.
+#
+# Part two is the Scoop bucket in another repository. It learns about a new build
+# either by polling `latest.json` in `main` (Scoop `checkver` + `autoupdate`) or from
+# the `repository_dispatch` below, which needs the optional BUCKET_REPO variable and
+# BUCKET_DISPATCH_TOKEN secret.
+name: Hermes Desktop Light build
+
+on:
+  schedule:
+    # Every six hours; the resolver exits immediately when nothing is new.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Build revision for the same upstream release (1 = first build, 2+ = rebuild)'
+        required: true
+        default: '1'
+        type: string
+      force:
+        description: 'Build even though this version is already published here'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hermes-desktop-light
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Unit checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.13'
+      - name: Version ordering against Scoop's own comparator
+        shell: pwsh
+        run: ./tests/version-order.ps1
+      - name: Resolution, guard and published-shape checks
+        run: python3 -m unittest discover -s tests -v
+
+  resolve:
+    name: Resolve upstream release
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.resolve.outputs.build }}
+      skip_reason: ${{ steps.resolve.outputs.skip_reason }}
+      version: ${{ steps.resolve.outputs.version }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      upstream_repo: ${{ steps.resolve.outputs.upstream_repo }}
+      upstream_tag: ${{ steps.resolve.outputs.upstream_tag }}
+      upstream_commit: ${{ steps.resolve.outputs.upstream_commit }}
+      upstream_url: ${{ steps.resolve.outputs.upstream_url }}
+      upstream_published_at: ${{ steps.resolve.outputs.upstream_published_at }}
+      claim_tag: ${{ steps.resolve.outputs.claim_tag }}
+      claim_object: ${{ steps.resolve.outputs.claim_object }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVISION: ${{ inputs.revision || '1' }}
+          FORCE: ${{ inputs.force || 'false' }}
+        run: |
+          set -euo pipefail
+          args=(--revision "$REVISION" --output "$GITHUB_OUTPUT")
+          if [ "$FORCE" = "true" ]; then args+=(--force); fi
+          python3 scripts/resolve_release.py "${args[@]}"
+      - name: Summarise
+        run: |
+          {
+            echo "### Hermes Desktop Light"
+            echo ""
+            echo "- upstream release: ${{ steps.resolve.outputs.upstream_tag }}"
+            echo "- upstream commit: ${{ steps.resolve.outputs.upstream_commit }}"
+            echo "- release claim: ${{ steps.resolve.outputs.claim_tag }}"
+            echo "- build version: ${{ steps.resolve.outputs.version }}"
+            echo "- build this run: ${{ steps.resolve.outputs.build }}"
+            echo "- skipped because: ${{ steps.resolve.outputs.skip_reason }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build and verify
+    needs: resolve
+    if: needs.resolve.outputs.build == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - name: Check out this builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: builder
+      - name: Check out the admitted upstream commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.resolve.outputs.upstream_repo }}
+          ref: ${{ needs.resolve.outputs.upstream_commit }}
+          fetch-depth: 0
+          path: upstream
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.13'
+      - name: Build, verify and package
+        shell: pwsh
+        env:
+          UPSTREAM_PUBLISHED_AT: ${{ needs.resolve.outputs.upstream_published_at }}
+          UPSTREAM_URL: ${{ needs.resolve.outputs.upstream_url }}
+        run: |
+          $arguments = @(
+            'builder/scripts/build_light.py'
+            '--source', 'upstream'
+            '--tag', '${{ needs.resolve.outputs.upstream_tag }}'
+            '--expected-commit', '${{ needs.resolve.outputs.upstream_commit }}'
+            '--claim-tag', '${{ needs.resolve.outputs.claim_tag }}'
+            '--claim-object', '${{ needs.resolve.outputs.claim_object }}'
+            '--version', '${{ needs.resolve.outputs.version }}'
+            '--release-tag', '${{ needs.resolve.outputs.release_tag }}'
+            '--asset-name', 'hermes-desktop-light-${{ needs.resolve.outputs.version }}-windows-x64.zip'
+            '--out', 'output'
+          )
+          python @arguments
+      - name: Upload the verified package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hermes-desktop-light
+          path: output/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: [resolve, build]
+    if: needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hermes-desktop-light
+          path: output
+      - name: Publish the release, then point the bucket at it
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BUCKET_REPO: ${{ vars.BUCKET_REPO }}
+          BUCKET_TOKEN: ${{ secrets.BUCKET_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/publish_release.py \
+            --asset "output/hermes-desktop-light-${{ needs.resolve.outputs.version }}-windows-x64.zip" \
+            --provenance output/provenance.json \
+            --out-dir output \
+            --update-main
+      - name: Summarise
+        run: |
+          {
+            echo "### Published ${{ needs.resolve.outputs.release_tag }}"
+            echo ""
+            echo "- asset: hermes-desktop-light-${{ needs.resolve.outputs.version }}-windows-x64.zip"
+            echo "- pointer: latest.json (main) and the release assets"
+            echo "- bucket: ${{ vars.BUCKET_REPO }}"
+          } >> "$GITHUB_STEP_SUMMARY"
