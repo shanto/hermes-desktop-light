@@ -6,10 +6,11 @@
 # No upstream Desktop channel or feed is consulted: upstream's release *claim* is
 # used purely because upstream's own preparation demands it.
 #
-# Part two is the Scoop bucket in another repository. It learns about a new build
-# either by polling `latest.json` in `main` (Scoop `checkver` + `autoupdate`) or from
-# the `repository_dispatch` below, which needs the optional BUCKET_REPO variable and
-# BUCKET_DISPATCH_TOKEN secret.
+# Part two is the Scoop bucket, which lives in another repository. The `publish` job
+# commits the manifest for every new build into that bucket (`SCOOP_REPO`, default
+# `shanto/Scoop`) through the `SCOOP_TOKEN` secret, which must be able to write there.
+# `latest.json` stays in this repository's `main` because the manifest's `checkver` and
+# `autoupdate` poll it.
 name: Hermes Desktop Light build
 
 on:
@@ -126,6 +127,10 @@ jobs:
           else {
             'published=false' >> $env:GITHUB_OUTPUT
           }
+          # Actions appends `exit $LASTEXITCODE` to every pwsh step, so the 404 that
+          # means "not published yet" would fail the step while still writing
+          # published=false. The guard's verdict is the output, not gh's exit code.
+          exit 0
       - name: Check out the admitted upstream commit
         if: steps.published.outputs.published == 'false'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -197,12 +202,10 @@ jobs:
         with:
           name: hermes-desktop-light
           path: output
-      - name: Publish the release, then point the bucket at it
+      - name: Publish the release and refresh the pointer
         if: steps.published.outputs.published == 'false'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          BUCKET_REPO: ${{ vars.BUCKET_REPO }}
-          BUCKET_TOKEN: ${{ secrets.BUCKET_DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           python3 scripts/publish_release.py \
@@ -210,6 +213,43 @@ jobs:
             --provenance output/provenance.json \
             --out-dir output \
             --update-main
+      - name: Check out the Scoop bucket
+        if: steps.published.outputs.published == 'false'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # github.token is scoped to this repository and cannot write there; the token
+          # input also keeps the credential out of the remote URL. The bucket's own
+          # default branch is used, so nothing here names it.
+          repository: ${{ github.repository_owner }}/Scoop
+          token: ${{ secrets.SCOOP_TOKEN }}
+          path: scoop
+      - name: Update the Scoop manifest
+        if: steps.published.outputs.published == 'false'
+        run: |
+          set -euo pipefail
+          manifest="output/hermes-desktop-light.json"
+          if [ ! -f "${manifest}" ]; then
+            echo "::error::${manifest} was not produced by the publish step"
+            exit 1
+          fi
+          cp "${manifest}" scoop/bucket/hermes-desktop-light.json
+      - name: Commit and push to the bucket
+        id: bucket
+        if: steps.published.outputs.published == 'false'
+        uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403 # v5.2.0
+        with:
+          repository: scoop
+          file_pattern: bucket/hermes-desktop-light.json
+          commit_message: 'hermes-desktop-light: Update to version ${{ needs.resolve.outputs.version }}'
+      - name: Verify the bucket carries the manifest
+        if: steps.published.outputs.published == 'false'
+        run: |
+          set -euo pipefail
+          branch="$(git -C scoop rev-parse --abbrev-ref HEAD)"
+          git -C scoop fetch --quiet --depth 1 origin "${branch}"
+          git -C scoop show "FETCH_HEAD:bucket/hermes-desktop-light.json" > "${RUNNER_TEMP}/bucket.json"
+          diff -u output/hermes-desktop-light.json "${RUNNER_TEMP}/bucket.json"
+          echo "verified ${branch} at $(git -C scoop rev-parse HEAD) carries the manifest"
       - name: Summarise
         run: |
           {
@@ -217,6 +257,6 @@ jobs:
             echo ""
             echo "- already published before this run: ${{ steps.published.outputs.published }}"
             echo "- asset: hermes-desktop-light-${{ needs.resolve.outputs.version }}-windows-x64.zip"
-            echo "- pointer: latest.json (main) and the release assets"
-            echo "- bucket: ${{ vars.BUCKET_REPO }}"
+            echo "- pointer: latest.json on main"
+            echo "- bucket manifest: ${{ github.repository_owner }}/Scoop bucket/hermes-desktop-light.json (changed: ${{ steps.bucket.outputs.changes_detected || 'skipped' }})"
           } >> "$GITHUB_STEP_SUMMARY"

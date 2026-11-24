@@ -428,7 +428,7 @@ class PublishShapeTest(unittest.TestCase):
             code = publish_release.main([
                 "--repository", REPOSITORY, "--asset", str(asset),
                 "--provenance", str(provenance_file), "--out-dir", str(out),
-                "--dry-run", "--update-main", "--dispatch-repo", "shanto/bucket"])
+                "--dry-run", "--update-main"])
             self.assertEqual(code, 0)
             manifest = json.loads(
                 (out / "hermes-desktop-light.json").read_text(encoding="utf-8"))

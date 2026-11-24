@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Publish a verified build as a GitHub Release and hand the manifest to the bucket.
+"""Publish a verified build as a GitHub Release and refresh the pointer.
 
 Assets published on the release: the ZIP, provenance.json, the Scoop manifest, the
-pointer file (latest.json) and SHA256SUMS. Two files are also committed to `main`
-so a consumer only has to read one URL:
+pointer file (latest.json) and SHA256SUMS. Only the pointer is committed to `main`:
 
   latest.json                    machine-readable pointer to the current build
-  bucket/hermes-desktop-light.json   the Scoop manifest for that build
 
-A consumer can either poll `latest.json` (Scoop `checkver` + `autoupdate`) or listen
-for the `repository_dispatch` event this script can raise in the bucket repository
-when BUCKET_REPO and a token that can write there are configured.
+The Scoop manifest is *generated* here but not committed here: the bucket lives in a
+separate repository and the workflow clones it and commits
+`bucket/hermes-desktop-light.json` there (see the publish job in build.yml). The
+manifest's `checkver`/`autoupdate` poll `latest.json` in this repository's `main`, so
+Scoop still needs no credentials to find a new build.
 
 `--dry-run` writes every generated file and prints the requests it would send
 without touching GitHub.
@@ -32,9 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from github_api import UPLOADS_ROOT, USER_AGENT, GitHub, GitHubError  # noqa: E402
 
 APP = "hermes-desktop-light"
-MANIFEST_PATH = f"bucket/{APP}.json"
+MANIFEST_NAME = f"{APP}.json"
 POINTER_PATH = "latest.json"
-DEFAULT_EVENT = "hermes-desktop-light-released"
 SHORTCUT_NAME = "Hermes Desktop (Light, Unofficial)"
 
 
@@ -114,7 +113,7 @@ def latest_pointer(provenance: dict, repository: str) -> dict:
 
 def sha256sums(provenance: dict) -> str:
     lines = [f"{provenance['sha256']}  {provenance['asset']}"]
-    for name in ("provenance.json", MANIFEST_PATH.split("/")[-1], POINTER_PATH):
+    for name in ("provenance.json", MANIFEST_NAME, POINTER_PATH):
         lines.append(f"# {name} is published as a release asset")
     return "\n".join(lines) + "\n"
 
@@ -227,10 +226,7 @@ def parse_args(argv=None):
     parser.add_argument("--branch", default="main")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--update-main", action="store_true",
-                        help="commit latest.json and the manifest to the default branch")
-    parser.add_argument("--dispatch-repo", default=os.environ.get("BUCKET_REPO", ""))
-    parser.add_argument("--dispatch-event", default=DEFAULT_EVENT)
-    parser.add_argument("--dispatch-token", default=os.environ.get("BUCKET_TOKEN"))
+                        help="commit latest.json to the default branch")
     parser.add_argument("--uploads-root", default=UPLOADS_ROOT)
     return parser.parse_args(argv)
 
@@ -260,7 +256,7 @@ def main(argv=None) -> int:
               file=sys.stderr)
         return 2
 
-    manifest_file = out / f"{APP}.json"
+    manifest_file = out / MANIFEST_NAME
     pointer_file = out / POINTER_PATH
     notes_file = out / "release-notes.md"
     sums_file = out / "SHA256SUMS"
@@ -275,7 +271,7 @@ def main(argv=None) -> int:
     assets = {
         asset.name: asset,
         "provenance.json": provenance_file,
-        f"{APP}.json": manifest_file,
+        MANIFEST_NAME: manifest_file,
         POINTER_PATH: pointer_file,
         "SHA256SUMS": sums_file,
     }
@@ -287,9 +283,7 @@ def main(argv=None) -> int:
         print(f"  manifest {manifest_file}")
         print(f"  pointer  {pointer_file}")
         if args.update_main:
-            print(f"  would commit {POINTER_PATH} and {MANIFEST_PATH} to {args.branch}")
-        if args.dispatch_repo:
-            print(f"  would dispatch {args.dispatch_event} to {args.dispatch_repo}")
+            print(f"  would commit {POINTER_PATH} to {args.branch}")
         return 0
 
     if not args.token:
@@ -327,33 +321,7 @@ def main(argv=None) -> int:
                        f"(upstream {provenance['upstream']['tag']})")
             put_file(client, args.repository, POINTER_PATH, pointer_file.read_bytes(),
                      message, args.branch)
-            put_file(client, args.repository, MANIFEST_PATH, manifest_file.read_bytes(),
-                     message, args.branch)
-            print(f"committed {POINTER_PATH} and {MANIFEST_PATH} to {args.branch}")
-
-        if args.dispatch_repo:
-            if not args.dispatch_token:
-                print("note: BUCKET_REPO is set but no BUCKET_TOKEN secret is available; "
-                      "skipping repository_dispatch (the bucket can still poll latest.json)")
-            else:
-                GitHub(args.dispatch_token).send(
-                    "POST", f"/repos/{args.dispatch_repo}/dispatches", {
-                        "event_type": args.dispatch_event,
-                        "client_payload": {
-                            "app": APP,
-                            "version": provenance["version"],
-                            "release_tag": release_tag,
-                            "asset": provenance["asset"],
-                            "url": asset_url(args.repository, release_tag, provenance["asset"]),
-                            "sha256": provenance["sha256"],
-                            "manifest": raw_url(args.repository, MANIFEST_PATH, args.branch),
-                            "pointer": raw_url(args.repository, POINTER_PATH, args.branch),
-                            "upstream_tag": provenance["upstream"]["tag"],
-                            "upstream_commit": provenance["upstream"]["commit"],
-                            "provenance": raw_url(args.repository, "latest.json", args.branch),
-                        },
-                    })
-                print(f"dispatched {args.dispatch_event} to {args.dispatch_repo}")
+            print(f"committed {POINTER_PATH} to {args.branch}")
     except GitHubError as exc:
         print(f"::error::{exc}", file=sys.stderr)
         return 2

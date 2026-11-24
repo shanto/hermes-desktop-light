@@ -4,8 +4,11 @@ Builds the **unofficial remote-only Windows build of Hermes Desktop** from the n
 plain (non-prerelease) release of [NousResearch/hermes-agent][upstream], verifies it,
 and publishes it as a GitHub Release in this repository.
 
-This is part one of two. Part two is your Scoop bucket, in another repository: it
-learns about a new build from this repository and ships the updated manifest.
+This is part one of two. Part two is the Scoop bucket, [shanto/Scoop][scoop]: this
+repository builds and publishes the release, then commits the updated manifest into
+that bucket. No manifest is stored here.
+
+[scoop]: https://github.com/shanto/Scoop
 
 [upstream]: https://github.com/NousResearch/hermes-agent
 
@@ -41,7 +44,7 @@ reported as a skip with its reason.
 | `checks` | ubuntu | unit checks pass, and the published version scheme orders correctly under Scoop's own comparator |
 | `resolve` | ubuntu | which upstream release to build, and whether to build at all |
 | `build` | windows-2025 | the checkout is the admitted commit, upstream's light build succeeds, the packaged stamp says `payload=light` / `updateMechanism=external`, no agent payload shipped, the application `LICENSE` (staged from the admitted commit) plus the Electron and Chromium notices are in the package, the app launches twice with a crippled PATH, the ZIP and provenance are produced |
-| `publish` | ubuntu | every asset uploads and reads back with a matching digest, the release is published, and the pointer/manifest are committed to `main` |
+| `publish` | ubuntu | every asset uploads and reads back with a matching digest, the release is published, `latest.json` is committed to `main`, and the manifest is committed to the bucket repository and read back from it |
 
 The build guards are fail-closed: a mismatch in commit, tag, claim object, stamp,
 executable name, or updater ownership stops the run before anything is published. A
@@ -59,16 +62,26 @@ Release assets (tag `v<version>`):
 | `latest.json` | machine-readable pointer to the current build |
 | `SHA256SUMS` | checksums of the ZIP |
 
-Two of those are also committed to `main`, so a consumer only needs one URL:
+`latest.json` is also committed to `main` here, so a consumer needs no secrets to find
+a build:
 
 ```
 latest.json                          pointer: version, url, sha256, upstream identity
-bucket/hermes-desktop-light.json     the Scoop manifest
 ```
+
+The manifest itself is committed to the bucket repository instead, as
+`bucket/hermes-desktop-light.json` in [`shanto/Scoop`][scoop] (`master`), by the
+`SCOOP_TOKEN` secret. Nothing else in the bucket is touched.
 
 ## Consuming it from the bucket
 
-Either poll the pointer (recommended, no secrets involved):
+```
+scoop bucket add shanto https://github.com/shanto/Scoop
+scoop install shanto/hermes-desktop-light
+```
+
+The manifest's `checkver`/`autoupdate` poll this repository's pointer, so Scoop finds
+new builds without any credential:
 
 ```json
 "checkver": { "url": "https://raw.githubusercontent.com/<owner>/<this-repo>/main/latest.json", "jsonpath": "$.version" },
@@ -80,13 +93,16 @@ Either poll the pointer (recommended, no secrets involved):
 }
 ```
 
-or listen for the push, by setting the repository variable `BUCKET_REPO` (e.g.
-`shanto/scoop`) and the secret `BUCKET_DISPATCH_TOKEN` (a token that can write to that
-repository — `GITHUB_TOKEN` cannot, it is scoped to this repository only). The
-dispatch is `repository_dispatch` with event type `hermes-desktop-light-released` and a
-`client_payload` carrying `version`, `url`, `sha256`, `manifest`, `pointer`,
-`upstream_tag` and `upstream_commit`. If `BUCKET_REPO` is unset, or the secret is
-missing, the run says so and publishes anyway.
+The bucket is updated in the same run, not by polling on its side: the `publish` job
+checks the bucket out in a second `actions/checkout`
+(`repository: ${{ github.repository_owner }}/Scoop`, `token: secrets.SCOOP_TOKEN`,
+`path: scoop`), copies the manifest over `bucket/hermes-desktop-light.json`, lets
+`stefanzweifel/git-auto-commit-action` commit it as
+`hermes-desktop-light: Update to version <version>`, and then reads the file back out
+of the pushed branch to confirm. `GITHUB_TOKEN` cannot do this — it is scoped to this
+repository — so `SCOOP_TOKEN` must be a token with `contents: write` on the bucket
+repository. A run without it fails at the push rather than silently shipping a stale
+bucket.
 
 ## Version scheme
 
@@ -122,8 +138,9 @@ update — and passes on this machine:
   duplicate ends green having published nothing. Workflow-level keying is impossible
   here: the commit is only known after `resolve` runs.
 
-Repository setup: `contents: write` permission (already declared in the workflow).
-Optional: the `BUCKET_REPO` variable and `BUCKET_DISPATCH_TOKEN` secret described above.
+Repository setup: `contents: write` permission (already declared in the workflow), and
+a `SCOOP_TOKEN` secret that can write to `shanto/Scoop`. The bucket repository and
+branch are set as `SCOOP_REPO` / `SCOOP_BRANCH` in the workflow's publish job.
 
 ## Local checks
 
