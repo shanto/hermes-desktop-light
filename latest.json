@@ -1,25 +1,25 @@
 {
   "schema": 1,
   "app": "hermes-desktop-light",
-  "version": "0.23.3",
-  "releaseTag": "v0.23.3",
-  "asset": "hermes-desktop-light-0.23.3-windows-x64.zip",
-  "url": "https://github.com/shanto/hermes-desktop-light/releases/download/v0.23.3/hermes-desktop-light-0.23.3-windows-x64.zip",
-  "sha256": "04becc93b2e56901fe3cfad7343b38ba44884c90e20367586872f838a812ac0c",
-  "size": 187457721,
+  "version": "0.23.4",
+  "releaseTag": "v0.23.4",
+  "asset": "hermes-desktop-light-0.23.4-windows-x64.zip",
+  "url": "https://github.com/shanto/hermes-desktop-light/releases/download/v0.23.4/hermes-desktop-light-0.23.4-windows-x64.zip",
+  "sha256": "0590b5e9fb39425ba3d5ff825ab3ec17b76819dbfe3a7f6d1de2aef4621f73ab",
+  "size": 187491603,
   "upstream": {
     "repository": "NousResearch/hermes-agent",
-    "tag": "v0.23.3",
-    "commit": "caafe5389ae585ef77387a962aee05b1bcf17029",
-    "claimTag": "rc.1-v0.23.3",
-    "url": "https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.3"
+    "tag": "v0.23.4",
+    "commit": "8fc0374447313e276f6b9a2764bfc750190c966a",
+    "claimTag": "rc.2-v0.23.4",
+    "url": "https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.4"
   },
-  "provenance": "https://github.com/shanto/hermes-desktop-light/releases/download/v0.23.3/provenance.json",
+  "provenance": "https://github.com/shanto/hermes-desktop-light/releases/download/v0.23.4/provenance.json",
   "source": "https://github.com/shanto/hermes-desktop-light",
-  "builtAt": "2026-11-22T11:59:07Z",
+  "builtAt": "2026-11-24T17:27:24Z",
   "builder": {
     "repository": "shanto/hermes-desktop-light",
-    "commit": "2f0f3d9e10b7cda5a07edb7859db6517377f19b9",
-    "workflowRun": "https://github.com/shanto/hermes-desktop-light/actions/runs/45019676802"
+    "commit": "c9b792a5556892b96a853e8adbba29df65bcd672",
+    "workflowRun": "https://github.com/shanto/hermes-desktop-light/actions/runs/45447743427"
   }
 }
